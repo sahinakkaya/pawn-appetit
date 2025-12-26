@@ -62,27 +62,44 @@ function PracticePanel() {
     if (newDeck.length > 0 && deck.positions.length === 0) {
       setDeck({ positions: newDeck, logs: [] });
     }
-  }, [deck, root, headers, setDeck]);
+  }, [deck.positions.length, root, headers, setDeck]); // Only depend on positions.length, not deck.logs
 
   // Calculate stats on every render so badges update when positions become due
   // This is now fast enough thanks to optimization in getStats() (reduced Date objects by ~50%)
   const stats = getStats(deck.positions);
 
+  const setInvisible = useSetAtom(currentInvisibleAtom);
+  const animationIntervalRef = useRef<number | null>(null);
+  const practiceAnimationSpeed = useAtomValue(practiceAnimationSpeedAtom);
+  const [isAnimating, setIsAnimating] = useState(false);
+
+  // Cache expensive findFen calls across re-renders
+  const fenCacheRef = useRef<Map<string, number[]>>(new Map());
+
   // Build a map of FEN -> position to avoid searching the tree repeatedly
+  // Uses a cache to avoid re-searching the tree for the same FENs
   const fenToPosition = useMemo(() => {
     const map = new Map<string, number[]>();
-    for (const pos of deck.positions) {
-      if (!map.has(pos.fen)) {
-        map.set(pos.fen, findFen(pos.fen, root));
+    const positions = deck.positions;
+
+    for (const pos of positions) {
+      // Check cache first
+      if (fenCacheRef.current.has(pos.fen)) {
+        map.set(pos.fen, fenCacheRef.current.get(pos.fen)!);
+      } else {
+        // Only search tree if not in cache
+        const position = findFen(pos.fen, root);
+        map.set(pos.fen, position);
+        fenCacheRef.current.set(pos.fen, position);
       }
     }
     return map;
   }, [deck.positions, root]);
 
-  const setInvisible = useSetAtom(currentInvisibleAtom);
-  const animationIntervalRef = useRef<number | null>(null);
-  const practiceAnimationSpeed = useAtomValue(practiceAnimationSpeedAtom);
-  const [isAnimating, setIsAnimating] = useState(false);
+  // Clear cache when tree structure changes
+  useEffect(() => {
+    fenCacheRef.current.clear();
+  }, [root]);
 
   // Cleanup animation interval on unmount and when dependencies change
   useEffect(() => {
