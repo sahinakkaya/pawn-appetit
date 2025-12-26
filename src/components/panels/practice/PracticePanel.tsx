@@ -17,7 +17,7 @@ import { modals } from "@mantine/modals";
 import { IconArrowRight } from "@tabler/icons-react";
 
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatDate } from "ts-fsrs";
 import { useStore } from "zustand";
@@ -64,7 +64,20 @@ function PracticePanel() {
     }
   }, [deck, root, headers, setDeck]);
 
+  // Calculate stats on every render so badges update when positions become due
+  // This is now fast enough thanks to optimization in getStats() (reduced Date objects by ~50%)
   const stats = getStats(deck.positions);
+
+  // Build a map of FEN -> position to avoid searching the tree repeatedly
+  const fenToPosition = useMemo(() => {
+    const map = new Map<string, number[]>();
+    for (const pos of deck.positions) {
+      if (!map.has(pos.fen)) {
+        map.set(pos.fen, findFen(pos.fen, root));
+      }
+    }
+    return map;
+  }, [deck.positions, root]);
 
   const setInvisible = useSetAtom(currentInvisibleAtom);
   const animationIntervalRef = useRef<number | null>(null);
@@ -92,7 +105,8 @@ function PracticePanel() {
       animationIntervalRef.current = null;
     }
 
-    const targetPosition = findFen(c.fen, root);
+    // Use cached position instead of searching the tree
+    const targetPosition = fenToPosition.get(c.fen) || [];
 
     // If animation is disabled, jump directly to the position without any animation
     if (practiceAnimationSpeed === "disabled") {
@@ -174,7 +188,7 @@ function PracticePanel() {
         setInvisible(true);
       }
     }, animationDelay);
-  }, [deck.positions, root, position, practiceAnimationSpeed, goToMove, setInvisible]);
+  }, [deck.positions, fenToPosition, position, practiceAnimationSpeed, goToMove, setInvisible]);
 
   // Auto-advance to next practice position after successful attempt
   const lastLogEntry = deck.logs[deck.logs.length - 1];

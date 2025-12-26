@@ -60,16 +60,30 @@ export function getStats(positions: Position[]) {
     nextDue: null,
     total: positions.length,
   };
+
+  // Create Date once instead of for each position
+  const now = new Date();
+
   for (const card of positions) {
     if (card.card.reps === 0) {
       stats.unseen++;
-    } else if (new Date(card.card.due) <= new Date()) {
-      stats.due++;
     } else {
-      stats.practiced++;
-    }
-    if (!stats.nextDue || new Date(card.card.due) < new Date(stats.nextDue)) {
-      stats.nextDue = card.card.due;
+      const cardDue = new Date(card.card.due);
+      if (cardDue <= now) {
+        stats.due++;
+      } else {
+        stats.practiced++;
+      }
+
+      // Update nextDue if this card is earlier
+      if (!stats.nextDue) {
+        stats.nextDue = card.card.due;
+      } else {
+        const nextDueDate = new Date(stats.nextDue);
+        if (cardDue < nextDueDate) {
+          stats.nextDue = card.card.due;
+        }
+      }
     }
   }
   return stats;
