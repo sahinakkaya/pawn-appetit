@@ -114,11 +114,19 @@ export function updateCardPerformance(
   const { card: newCard, log } = schedulingCards[grade];
 
   setPositions((data) => {
-    data.positions[i].card = newCard;
-    data.logs.push({ ...log, fen: data.positions[i].fen });
+    // Immutably update the position at index i
+    const newPositions = [...data.positions];
+    newPositions[i] = {
+      ...newPositions[i],
+      card: newCard,
+    };
+
+    // Immutably add to logs
+    const newLogs = [...data.logs, { ...log, fen: data.positions[i].fen }];
+
     return {
-      positions: data.positions,
-      logs: data.logs,
+      positions: newPositions,
+      logs: newLogs,
     };
   });
 }

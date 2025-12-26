@@ -62,27 +62,44 @@ function PracticePanel() {
     if (newDeck.length > 0 && deck.positions.length === 0) {
       setDeck({ positions: newDeck, logs: [] });
     }
-  }, [deck, root, headers, setDeck]);
+  }, [deck.positions.length, root, headers, setDeck]); // Only depend on positions.length, not deck.logs
 
   // Calculate stats on every render so badges update when positions become due
   // This is now fast enough thanks to optimization in getStats() (reduced Date objects by ~50%)
   const stats = getStats(deck.positions);
 
+  const setInvisible = useSetAtom(currentInvisibleAtom);
+  const animationIntervalRef = useRef<number | null>(null);
+  const practiceAnimationSpeed = useAtomValue(practiceAnimationSpeedAtom);
+  const [isAnimating, setIsAnimating] = useState(false);
+
+  // Cache expensive findFen calls across re-renders
+  const fenCacheRef = useRef<Map<string, number[]>>(new Map());
+
   // Build a map of FEN -> position to avoid searching the tree repeatedly
+  // Uses a cache to avoid re-searching the tree for the same FENs
   const fenToPosition = useMemo(() => {
     const map = new Map<string, number[]>();
-    for (const pos of deck.positions) {
-      if (!map.has(pos.fen)) {
-        map.set(pos.fen, findFen(pos.fen, root));
+    const positions = deck.positions;
+
+    for (const pos of positions) {
+      // Check cache first
+      if (fenCacheRef.current.has(pos.fen)) {
+        map.set(pos.fen, fenCacheRef.current.get(pos.fen)!);
+      } else {
+        // Only search tree if not in cache
+        const position = findFen(pos.fen, root);
+        map.set(pos.fen, position);
+        fenCacheRef.current.set(pos.fen, position);
       }
     }
     return map;
   }, [deck.positions, root]);
 
-  const setInvisible = useSetAtom(currentInvisibleAtom);
-  const animationIntervalRef = useRef<number | null>(null);
-  const practiceAnimationSpeed = useAtomValue(practiceAnimationSpeedAtom);
-  const [isAnimating, setIsAnimating] = useState(false);
+  // Clear cache when tree structure changes
+  useEffect(() => {
+    fenCacheRef.current.clear();
+  }, [root]);
 
   // Cleanup animation interval on unmount and when dependencies change
   useEffect(() => {
@@ -383,8 +400,14 @@ function PracticePanel() {
         </Tabs.Panel>
       </Tabs>
 
-      <PositionsModal open={positionsOpen} setOpen={setPositionsOpen} deck={deck} />
-      <LogsModal open={logsOpen} setOpen={setLogsOpen} logs={deck.logs} />
+      <PositionsModal
+        open={positionsOpen}
+        setOpen={setPositionsOpen}
+        deck={deck}
+        fenToPosition={fenToPosition}
+        root={root}
+      />
+      <LogsModal open={logsOpen} setOpen={setLogsOpen} logs={deck.logs} fenToPosition={fenToPosition} root={root} />
     </>
   );
 }
@@ -393,22 +416,25 @@ function PositionsModal({
   open,
   setOpen,
   deck,
+  fenToPosition,
+  root,
 }: {
   open: boolean;
   setOpen: (open: boolean) => void;
   deck: PracticeData;
+  fenToPosition: Map<string, number[]>;
+  root: any; // Using any for simplicity as import is not easily available, or I should rely on inferred type or import TreeNode
 }) {
   const { t } = useTranslation();
-
   const store = useContext(TreeStateContext)!;
-  const root = useStore(store, (s) => s.root);
   const goToMove = useStore(store, (s) => s.goToMove);
-  return (
-    <Modal opened={open} onClose={() => setOpen(false)} size="xl" title={<b>Practice Positions</b>}>
-      {deck.positions.length === 0 && <Text>{t("practice.noPositionsYet")}</Text>}
+
+  const content = useMemo(() => {
+    if (!open) return null;
+    return (
       <SimpleGrid cols={2}>
         {deck.positions.map((c) => {
-          const position = findFen(c.fen, root);
+          const position = fenToPosition.get(c.fen) || findFen(c.fen, root);
           const node = getNodeAtPath(root, position);
           return (
             <Card key={c.fen}>
@@ -451,6 +477,13 @@ function PositionsModal({
           );
         })}
       </SimpleGrid>
+    );
+  }, [open, deck.positions, fenToPosition, root, t, goToMove, setOpen]);
+
+  return (
+    <Modal opened={open} onClose={() => setOpen(false)} size="xl" title={<b>Practice Positions</b>}>
+      {deck.positions.length === 0 && <Text>{t("practice.noPositionsYet")}</Text>}
+      {content}
     </Modal>
   );
 }
@@ -459,21 +492,26 @@ function LogsModal({
   open,
   setOpen,
   logs,
+  fenToPosition,
+  root,
 }: {
   open: boolean;
   setOpen: (open: boolean) => void;
   logs: PracticeData["logs"];
+  fenToPosition: Map<string, number[]>;
+  root: any;
 }) {
   const { t } = useTranslation();
   const store = useContext(TreeStateContext)!;
-  const root = useStore(store, (s) => s.root);
   const goToMove = useStore(store, (s) => s.goToMove);
-  return (
-    <Modal opened={open} onClose={() => setOpen(false)} size="xl" title={<b>Practice Logs</b>}>
+
+  const content = useMemo(() => {
+    if (!open) return null;
+    return (
       <SimpleGrid cols={2}>
         {logs.length === 0 && <Text>{t("practice.noLogsYet")}</Text>}
         {logs.map((log) => {
-          const position = findFen(log.fen, root);
+          const position = fenToPosition.get(log.fen) || findFen(log.fen, root);
           const node = getNodeAtPath(root, position);
 
           return (
@@ -512,6 +550,12 @@ function LogsModal({
           );
         })}
       </SimpleGrid>
+    );
+  }, [open, logs, fenToPosition, root, t, goToMove, setOpen]);
+
+  return (
+    <Modal opened={open} onClose={() => setOpen(false)} size="xl" title={<b>Practice Logs</b>}>
+      {content}
     </Modal>
   );
 }
